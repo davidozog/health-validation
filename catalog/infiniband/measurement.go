@@ -10,7 +10,7 @@
 //     next up, and the link-flap check evaluates the outage durations.
 //   - [PortMeasurement] is the present: sysfs reports the current state of
 //     every port on every channel adapter, one measurement per port, and
-//     the port-state check evaluates it.
+//     the port-state and port-rate checks evaluate it.
 //
 // The two schemas are disjoint so a check routes to exactly one of them.
 package infiniband

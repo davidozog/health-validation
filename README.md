@@ -215,6 +215,7 @@ The catalog includes these check families:
 | `nvlink_p2p` | nvlink | Peer GPUs reachable over NVLink P2P | `max_unhealthy_p2p_peers` |
 | `rdma_linkflap_fatal` | infiniband | mlx5 RDMA link outages that stayed down past a window | `min_outage_seconds`, `fatal_flap_threshold` |
 | `ib_port_state` | infiniband | Whether every InfiniBand or RoCE port is ACTIVE with its link up | `checked_link_layers`, `expected_ib_state`, `expected_ib_physical_state` |
+| `ib_port_rate` | infiniband | Whether every linked-up port negotiated its platform's rate, or a legal split of it | `checked_link_layers`, `expected_ib_rate_gbps`, `expected_ib_split_rates_gbps`, `infiniband_port_split`, `ethernet_port_split` |
 | `gpu_xid_<code>` | xid | One check per Xid code seen in the journal, with catalog-defined severity and action | None |
 | `gpu_xid_149_<hex>` | xid | One check per Xid 149 NETIR_LINK_EVT/NETIR_LINK_DOWN subtype NVIDIA's decode table distinguishes | None |
 | `gpu_xid_154` | xid | Xid 154 (INFO — recovery action changed) | None |

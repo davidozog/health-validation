@@ -104,7 +104,7 @@ func (a *App) builtinCollect() ([]collect.Sensor, []CollectAdapter) {
 		sources = append(sources, cpusensor.New(nil))
 		adapters = append(adapters, collectadapters.CPU())
 	}
-	// Port state is checked on RoCE ports too, so the stock CLI
+	// Port state and rate are checked on RoCE ports too, so the stock CLI
 	// widens the sensor's InfiniBand-only default. Signal narrowing keeps
 	// sysfs untouched unless an InfiniBand port check will run.
 	sources = append(sources, ibsensor.New(nil, ibsensor.WithLinkLayers("InfiniBand", "Ethernet")))

@@ -214,7 +214,7 @@ func TestPortState_Errored(t *testing.T) {
 }
 
 // A port missing only its rate still has both state signals, so this check
-// evaluates normally; the failure belongs to a check that reads the rate.
+// evaluates normally while ib_port_rate is the one that fails.
 func TestPortState_UnrelatedSignalErrorStillEvaluates(t *testing.T) {
 	m := port("ACTIVE", "LinkUp")
 	m.AddError(errors.New("rate: permission denied"), infiniband.SignalIBRateGbps)

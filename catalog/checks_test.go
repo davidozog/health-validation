@@ -82,6 +82,7 @@ func TestBuiltinChecks_ConditionScope(t *testing.T) {
 		"nvlink_fabric":        health.DomainScope,
 		"rdma_linkflap_fatal":  health.ClusterScope,
 		"ib_port_state":        health.ClusterScope,
+		"ib_port_rate":         health.ClusterScope,
 	}
 
 	seen := make(map[string]bool)

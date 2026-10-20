@@ -12,11 +12,16 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   must be ACTIVE with its physical link up. Verdicts name the port (`mlx5_0/1`)
   in `affected_components[].entities`. `checked_link_layers` lets a fleet with
   uncabled RoCE ports scope the check to InfiniBand.
-- The stock CLI feeds that check from the `collect/sensors/infiniband` sysfs
+- `ib_port_rate` rates every linked-up port on a checked link layer against
+  the platform's full rate or its split ladder (GB200 400 Gb/s, GB300
+  800 Gb/s): a rate off the ladder is CRITICAL; an unsplit port on a legal
+  division is a WARNING, since it is most often an undeclared split.
+- The stock CLI feeds those checks from the `collect/sensors/infiniband` sysfs
   sensor through the collect bridge, requesting port signals only when a port
   check will run.
 - `collect/sensors/infiniband.New` takes options; `WithLinkLayers` admits
   non-InfiniBand (RoCE) ports. The default stays InfiniBand-only.
+- Config overrides coerce `[]float64` thresholds.
 
 ### Changed
 

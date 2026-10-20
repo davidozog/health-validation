@@ -77,8 +77,11 @@ func TestBuiltinCollectNarrowsInfiniBandToPortChecks(t *testing.T) {
 		{name: "port state", runnable: []health.CheckDefinition{infiniband.PortState()}, want: [][]string{{
 			ibsignals.StateName.ID(), ibsignals.PhysicalStateName.ID(), ibsignals.LinkLayer.ID(),
 		}}},
-		{name: "link flap and port state", runnable: []health.CheckDefinition{infiniband.RDMALinkFlapFatal(), infiniband.PortState()}, want: [][]string{{
-			ibsignals.StateName.ID(), ibsignals.PhysicalStateName.ID(), ibsignals.LinkLayer.ID(),
+		{name: "port rate", runnable: []health.CheckDefinition{infiniband.PortRate()}, want: [][]string{{
+			ibsignals.PhysicalStateName.ID(), ibsignals.LinkLayer.ID(), ibsignals.RateGbps.ID(),
+		}}},
+		{name: "both port checks", runnable: []health.CheckDefinition{infiniband.RDMALinkFlapFatal(), infiniband.PortState(), infiniband.PortRate()}, want: [][]string{{
+			ibsignals.StateName.ID(), ibsignals.PhysicalStateName.ID(), ibsignals.LinkLayer.ID(), ibsignals.RateGbps.ID(),
 		}}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -140,14 +143,20 @@ func TestBuiltinCollectInfiniBandPortVerdicts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var downPort bool
+	var downPort, ratePass, rateCritical bool
 	for _, c := range verdict.CheckResults {
-		if c.CheckID == "ib_port_state" && c.Severity == health.Critical {
-			downPort = downPort || slices.Equal(c.AffectedEntities, []string{"mlx5_2/1"})
+		switch c.CheckID {
+		case "ib_port_state":
+			if c.Severity == health.Critical {
+				downPort = downPort || slices.Equal(c.AffectedEntities, []string{"mlx5_2/1"})
+			}
+		case "ib_port_rate":
+			ratePass = ratePass || c.Severity == health.Pass
+			rateCritical = rateCritical || c.Severity >= health.Critical
 		}
 	}
-	if !downPort {
-		t.Fatalf("want ib_port_state CRITICAL naming mlx5_2/1: %+v", verdict.CheckResults)
+	if !downPort || !ratePass || rateCritical {
+		t.Fatalf("want ib_port_state CRITICAL naming mlx5_2/1 and ib_port_rate passing: %+v", verdict.CheckResults)
 	}
 }
 
