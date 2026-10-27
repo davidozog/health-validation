@@ -114,13 +114,13 @@ func TestParseBoundaries(t *testing.T) {
 	}
 }
 
-// A host without the InfiniBand class has no devices, so Read reports
-// nothing rather than a failure; a class that exists but is unreadable still
-// fails.
-func TestMissingClassIsNoDevices(t *testing.T) {
+// A missing InfiniBand class is a read failure, not an empty inventory: the
+// source cannot tell a host without RDMA devices from one whose driver is
+// not loaded, so that judgment is left to consumers.
+func TestMissingClassIsAFailure(t *testing.T) {
 	s := New(os.DirFS(filepath.Join(t.TempDir(), "absent")))
 	readings, err := s.Read(context.Background(), collect.Signals{ibsignals.State, ibsignals.FirmwareVersion})
-	require.NoError(t, err)
+	require.ErrorIs(t, err, fs.ErrNotExist)
 	require.Empty(t, readings)
 }
 

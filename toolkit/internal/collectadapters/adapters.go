@@ -35,10 +35,6 @@ type domainAdapter struct {
 	// node; grouping them per source would split one fact set into partial
 	// measurements that each fail the other's fields.
 	nodeScoped bool
-	// emptyIsNeutral makes a domain with no observations yield no
-	// measurements, so its checks are skipped rather than failed: the
-	// hardware is absent, not unreadable.
-	emptyIsNeutral bool
 }
 
 // CPU replaces toolkit.CPUSensor for the stock CLI's CPU domain.
@@ -68,12 +64,12 @@ func NVLink() *domainAdapter {
 
 // InfiniBand feeds infiniband.PortMeasurement from the collect sysfs port
 // sensor; the journal link-flap sensor still supplies the category's other
-// type. A host without InfiniBand devices yields no ports and no
-// measurements, whereas an unreadable sysfs fails every port signal.
+// type. Finding no ports is a collection failure like any other domain's:
+// a missing driver or the device-name filter can leave sysfs empty, so
+// absence cannot be read as "nothing to check". Deployments without
+// InfiniBand disable the port check instead.
 func InfiniBand() *domainAdapter {
-	a := newDomainAdapter(health.InfiniBand, erroredInfiniBand, false)
-	a.emptyIsNeutral = true
-	return a
+	return newDomainAdapter(health.InfiniBand, erroredInfiniBand, false)
 }
 
 // newDomainAdapter requests every signal the converter maps onto category,
@@ -95,7 +91,7 @@ func (a *domainAdapter) Signals() map[string][]string { return maps.Clone(a.feed
 // Build consumes observations already validated by the bridge.
 func (a *domainAdapter) Build(obs []*observation.Observation) []health.Measurement {
 	measurements := adaptCategory(a.category, a.feeds, a.nodeScoped, obs)
-	if len(measurements) == 0 && !a.emptyIsNeutral {
+	if len(measurements) == 0 {
 		return a.Errored(fmt.Errorf("no %s observations were collected", a.Name()))
 	}
 	return measurements
