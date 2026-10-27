@@ -142,19 +142,21 @@ func TestPortState_NamesTheActualLinkLayer(t *testing.T) {
 }
 
 // A down RoCE port is CRITICAL by default; a fleet whose Ethernet ports are
-// uncabled drops them from checked_link_layers instead of disabling the check.
-func TestPortState_CheckedLinkLayers(t *testing.T) {
-	m := port("DOWN", "Polling")
-	m.LinkLayer = "Ethernet"
+// uncabled adds them to excluded_link_layers instead of disabling the check.
+// The list excludes rather than includes so a typo checks more ports, never
+// fewer: "Infiniband" excludes nothing and the down port still fails.
+func TestPortState_ExcludedLinkLayers(t *testing.T) {
+	down := port("DOWN", "Polling")
+	down.LinkLayer = "Ethernet"
 	cat := ibCatalog(catalog.WithOverrides(catalog.NewOverrideSet(
-		catalog.Override{CheckID: "ib_port_state", ThresholdName: "checked_link_layers", Value: []string{"InfiniBand"}},
+		catalog.Override{CheckID: "ib_port_state", ThresholdName: "excluded_link_layers", Value: []string{"Ethernet"}},
 	)))
-	v, err := cat.Evaluate("ib_port_state", m)
+	v, err := cat.Evaluate("ib_port_state", down)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if v.Skipped || v.Severity != health.Pass {
-		t.Errorf("down Ethernet port with only InfiniBand checked: skipped=%v severity=%v, want PASS", v.Skipped, v.Severity)
+		t.Errorf("down Ethernet port with Ethernet excluded: skipped=%v severity=%v, want PASS", v.Skipped, v.Severity)
 	}
 	v, err = cat.Evaluate("ib_port_state", port("DOWN", "Polling"))
 	if err != nil {
@@ -162,6 +164,17 @@ func TestPortState_CheckedLinkLayers(t *testing.T) {
 	}
 	if v.Severity != health.Critical {
 		t.Errorf("down InfiniBand port still checked: severity = %v, want CRITICAL", v.Severity)
+	}
+
+	typo := ibCatalog(catalog.WithOverrides(catalog.NewOverrideSet(
+		catalog.Override{CheckID: "ib_port_state", ThresholdName: "excluded_link_layers", Value: []string{"Infiniband"}},
+	)))
+	v, err = typo.Evaluate("ib_port_state", port("DOWN", "Polling"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Severity != health.Critical {
+		t.Errorf("misspelled exclusion must exclude nothing: severity = %v, want CRITICAL", v.Severity)
 	}
 }
 

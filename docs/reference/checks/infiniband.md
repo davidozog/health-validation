@@ -8,7 +8,7 @@ InfiniBand covers InfiniBand network health: port state, error rates, and link i
 
 `ib_port_state`
 
-Verifies every port on a checked link layer (InfiniBand and RoCE by default) is in the expected logical state (ACTIVE) and physical link state (LinkUp). Fails CRITICAL per port that is not.
+Verifies every port (InfiniBand and RoCE alike, unless its link layer is excluded) is in the expected logical state (ACTIVE) and physical link state (LinkUp). Fails CRITICAL per port that is not.
 
 | Property | Value |
 |---|---|
@@ -25,15 +25,15 @@ Verifies every port on a checked link layer (InfiniBand and RoCE by default) is 
 
 | Name | Value | Unit | Category | Description |
 |---|---|---|---|---|
-| <nobr>`checked_link_layers`</nobr> | [InfiniBand Ethernet] |  | <nobr>`DEFAULT`</nobr> | Link layers, as sysfs names them, whose ports this check evaluates; ports on any other link layer are not assessed. Drop "Ethernet" for a fleet whose RoCE ports are uncabled or run at their own speeds, rather than disabling the check. |
+| <nobr>`excluded_link_layers`</nobr> | [] |  | <nobr>`DEFAULT`</nobr> | Link layers, as sysfs names them ("InfiniBand", "Ethernet"), whose ports this check does not assess. Empty by default, so every port is checked. Add "Ethernet" for a fleet whose RoCE ports are uncabled, rather than disabling the check. A misspelled entry excludes nothing. |
 | <nobr>`expected_ib_physical_state`</nobr> | LinkUp | state | <nobr>`DEFAULT`</nobr> | Physical link state every port must report, as sysfs names it in phys_state. Override per fleet. |
 | <nobr>`expected_ib_state`</nobr> | ACTIVE | state | <nobr>`DEFAULT`</nobr> | Logical port state every port must report, as sysfs names it (the text after the colon in /sys/class/infiniband/&lt;dev>/ports/&lt;n>/state). Override per fleet. |
 
 **Rules**
 
-- **CRITICAL** when `ib_link_layer in checked_link_layers && ib_state != expected_ib_state`
+- **CRITICAL** when `!(ib_link_layer in excluded_link_layers) && ib_state != expected_ib_state`
   - Message: Port $\{ib_device\}:$\{ib_port\} ($\{ib_link_layer\}): state $\{ib_state\}, expected $\{expected_ib_state\}.
-- **CRITICAL** when `ib_link_layer in checked_link_layers && ib_physical_state != expected_ib_physical_state`
+- **CRITICAL** when `!(ib_link_layer in excluded_link_layers) && ib_physical_state != expected_ib_physical_state`
   - Message: Port $\{ib_device\}:$\{ib_port\} ($\{ib_link_layer\}): physical state $\{ib_physical_state\}, expected $\{expected_ib_physical_state\}.
 
 **Recommended action:** operational state `drain`, then `reset_gpu` → `restart_os` → `service_required`

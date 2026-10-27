@@ -14,9 +14,11 @@ import "github.com/dsx-ai-factory/health-validation/catalog/health"
 // of Polling or Disabled means the link never trained at all, which points
 // at the cable, transceiver, or the switch port. A down port reports both.
 //
-// It applies to every port on a link layer in checked_link_layers: a port that
-// is down is down whether it runs InfiniBand or RoCE. A fleet with uncabled
-// RoCE ports drops Ethernet from that list rather than disabling the check.
+// It applies to every port the sensor reports, whatever its link layer: a
+// port that is down is down whether it runs InfiniBand or RoCE. A fleet with
+// uncabled RoCE ports lists Ethernet in excluded_link_layers rather than
+// disabling the check. An exclusion list fails safe: a misspelled entry
+// checks more ports than intended instead of letting a down port pass.
 //
 // It consumes a [PortMeasurement] from the sysfs port sensor and evaluates one
 // port per measurement. Both expected states are operator-overridable for
@@ -25,7 +27,7 @@ func PortState() health.CheckDefinition {
 	return health.CheckDefinition{
 		ID:          "ib_port_state",
 		Name:        "InfiniBand Port State",
-		Description: "Verifies every port on a checked link layer (InfiniBand and RoCE by default) is in the expected logical state (ACTIVE) and physical link state (LinkUp). Fails CRITICAL per port that is not.",
+		Description: "Verifies every port (InfiniBand and RoCE alike, unless its link layer is excluded) is in the expected logical state (ACTIVE) and physical link state (LinkUp). Fails CRITICAL per port that is not.",
 		Category:    health.InfiniBand,
 
 		RequiredSignals: []string{
@@ -47,11 +49,11 @@ func PortState() health.CheckDefinition {
 		RecommendedAction: health.GenericDrain(),
 
 		Thresholds: map[string]health.ThresholdSpec{
-			"checked_link_layers": {
-				Value:       []string{"InfiniBand", "Ethernet"},
+			"excluded_link_layers": {
+				Value:       []string{},
 				ValueType:   health.ThresholdStringList,
 				Category:    health.DefaultThreshold,
-				Description: "Link layers, as sysfs names them, whose ports this check evaluates; ports on any other link layer are not assessed. Drop \"Ethernet\" for a fleet whose RoCE ports are uncabled or run at their own speeds, rather than disabling the check.",
+				Description: "Link layers, as sysfs names them (\"InfiniBand\", \"Ethernet\"), whose ports this check does not assess. Empty by default, so every port is checked. Add \"Ethernet\" for a fleet whose RoCE ports are uncabled, rather than disabling the check. A misspelled entry excludes nothing.",
 			},
 			"expected_ib_state": {
 				Value:       "ACTIVE",
@@ -71,12 +73,12 @@ func PortState() health.CheckDefinition {
 
 		Rules: []health.Rule{
 			{
-				Expression: "ib_link_layer in checked_link_layers && ib_state != expected_ib_state",
+				Expression: "!(ib_link_layer in excluded_link_layers) && ib_state != expected_ib_state",
 				Severity:   health.Critical,
 				Message:    "Port ${ib_device}:${ib_port} (${ib_link_layer}): state ${ib_state}, expected ${expected_ib_state}.",
 			},
 			{
-				Expression: "ib_link_layer in checked_link_layers && ib_physical_state != expected_ib_physical_state",
+				Expression: "!(ib_link_layer in excluded_link_layers) && ib_physical_state != expected_ib_physical_state",
 				Severity:   health.Critical,
 				Message:    "Port ${ib_device}:${ib_port} (${ib_link_layer}): physical state ${ib_physical_state}, expected ${expected_ib_physical_state}.",
 			},
