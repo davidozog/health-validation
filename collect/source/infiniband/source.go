@@ -37,19 +37,37 @@ type Source struct {
 	excluded   map[string]bool
 	restricted map[string]error
 	mu         sync.Mutex
+	allDevices bool
 }
+
+// Option configures a Source.
+type Option func(*Source)
+
+// WithExcludedDevices skips the named devices.
+func WithExcludedDevices(names ...string) Option {
+	return func(s *Source) {
+		for _, name := range names {
+			s.excluded[name] = true
+		}
+	}
+}
+
+// WithAllDevices reads every device under the class. The default reads only
+// devices named mlx*, as GPUd does, which misses an NVIDIA RDMA device the
+// host has renamed (for example rdma0).
+func WithAllDevices() Option { return func(s *Source) { s.allDevices = true } }
 
 // New uses /sys/class/infiniband when files is nil. An fs.FS permits fixture
 // testing and alternate host mounts without changing process-global paths.
-func New(files fs.FS, excludedDevices ...string) *Source {
+func New(files fs.FS, opts ...Option) *Source {
 	if files == nil {
 		files = os.DirFS(DefaultRoot)
 	}
-	excluded := make(map[string]bool, len(excludedDevices))
-	for _, device := range excludedDevices {
-		excluded[device] = true
+	s := &Source{files: files, excluded: make(map[string]bool), restricted: make(map[string]error)}
+	for _, opt := range opts {
+		opt(s)
 	}
-	return &Source{files: files, excluded: excluded, restricted: make(map[string]error)}
+	return s
 }
 
 // Reading is one selected signal for a typed HCA or port target.
@@ -104,7 +122,7 @@ func (s *Source) Read(ctx context.Context, selected collect.Signals) ([]Reading,
 	var readings []Reading
 	cache := make(map[string]fileResult)
 	for _, device := range devices {
-		if s.excluded[device.Name()] || !strings.HasPrefix(device.Name(), "mlx") {
+		if s.excluded[device.Name()] || (!s.allDevices && !strings.HasPrefix(device.Name(), "mlx")) {
 			continue
 		}
 		target := observation.InfiniBandDeviceTarget(device.Name())

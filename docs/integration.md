@@ -95,9 +95,10 @@ Xid read runs `journalctl --output=json --output-fields=MESSAGE`, which needs
 systemd 236 or later; without a readable kernel journal for the current boot,
 `gpu_xid_*` returns collection-failure verdicts.
 `ib_port_state` reads `/sys/class/infiniband`, which the container sees
-through the host's sysfs without extra mounts. Finding no ports there is a
-collection failure, not a skip, so a deployment without InfiniBand lists the
-check in `disabled_checks`.
+through the host's sysfs without extra mounts, and examines every device
+there, not only `mlx*`-named ones. Finding no ports is a collection failure,
+not a skip, so a deployment without InfiniBand lists the check in
+`disabled_checks`.
 
 ### Static binary (bare metal, Slurm)
 

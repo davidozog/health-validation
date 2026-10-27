@@ -160,10 +160,15 @@ func TestBuiltinCollectInfiniBandPortVerdicts(t *testing.T) {
 }
 
 // collectInfiniBandPorts runs the stock InfiniBand wiring over fsys as
-// /sys/class/infiniband and returns the port measurements it builds.
-func collectInfiniBandPorts(t *testing.T, runnable []*health.CheckDefinition, fsys fs.FS) []health.Measurement {
+// /sys/class/infiniband and returns the port measurements it builds. The
+// source options default to the stock CLI's; pass collect's defaults
+// explicitly to contrast them.
+func collectInfiniBandPorts(t *testing.T, runnable []*health.CheckDefinition, fsys fs.FS, sourceOpts ...ibsource.Option) []health.Measurement {
 	t.Helper()
-	source := ibsensor.New(ibsource.New(fsys), ibsensor.WithLinkLayers("InfiniBand", "Ethernet"))
+	if sourceOpts == nil {
+		sourceOpts = []ibsource.Option{ibsource.WithAllDevices()}
+	}
+	source := ibsensor.New(ibsource.New(fsys, sourceOpts...), ibsensor.WithLinkLayers("InfiniBand", "Ethernet"))
 	sensors, err := New().collectSensors(time.Second, []collect.Sensor{source}, []CollectAdapter{collectadapters.InfiniBand()}, requiredFor(runnable))
 	if err != nil {
 		t.Fatal(err)
@@ -180,10 +185,10 @@ func collectInfiniBandPorts(t *testing.T, runnable []*health.CheckDefinition, fs
 }
 
 // Finding no ports is a collection failure, not a healthy host without
-// InfiniBand: a missing class, an empty one, one whose every device the
-// mlx name filter drops, and one that cannot be read all look alike from
-// sysfs, and a missing driver produces the first. Each fails the port
-// check without naming a port rather than letting the run report PASS.
+// InfiniBand: a missing class, an empty one, one whose every device
+// collect's mlx name filter drops, and one that cannot be read all look
+// alike from sysfs, and a missing driver produces the first. Each fails the
+// port check without naming a port rather than letting the run report PASS.
 func TestBuiltinCollectInfiniBandAbsenceFails(t *testing.T) {
 	cat, _, err := buildCatalog(nil, nil, "GB200", health.OperatorInfra)
 	if err != nil {
@@ -199,14 +204,17 @@ func TestBuiltinCollectInfiniBandAbsenceFails(t *testing.T) {
 		"rdma0/ports/1/phys_state": &fstest.MapFile{Data: []byte("2: Polling")},
 		"rdma0/ports/1/rate":       &fstest.MapFile{Data: []byte("400 Gb/sec (4X NDR)")},
 	}
-	for name, fsys := range map[string]fs.FS{
-		"missing class":    os.DirFS(filepath.Join(t.TempDir(), "infiniband")),
-		"no devices":       fstest.MapFS{},
-		"only renamed":     renamed,
-		"unreadable class": unreadableFS{},
+	for name, tc := range map[string]struct {
+		fsys fs.FS
+		opts []ibsource.Option
+	}{
+		"missing class":          {fsys: os.DirFS(filepath.Join(t.TempDir(), "infiniband"))},
+		"no devices":             {fsys: fstest.MapFS{}},
+		"only renamed, filtered": {fsys: renamed, opts: []ibsource.Option{WithCollectDefaults()}},
+		"unreadable class":       {fsys: unreadableFS{}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			measurements := collectInfiniBandPorts(t, runnable, fsys)
+			measurements := collectInfiniBandPorts(t, runnable, tc.fsys, tc.opts...)
 			if len(measurements) != 1 {
 				t.Fatalf("got %d measurements, want one collection failure: %v", len(measurements), measurements)
 			}
@@ -233,6 +241,72 @@ func TestBuiltinCollectInfiniBandAbsenceFails(t *testing.T) {
 		})
 	}
 }
+
+// A DOWN port on a renamed device must not hide behind a healthy mlx5_0:
+// the stock CLI reads every device, so the check fails and names rdma0/1.
+// Collect's GPUd-parity default drops the renamed device and the same host
+// passes, which is why the CLI does not use it.
+func TestBuiltinCollectInfiniBandRenamedDevice(t *testing.T) {
+	cat, _, err := buildCatalog(nil, nil, "GB200", health.OperatorInfra)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runnable, err := cat.RunnableChecks(catalog.EvaluationOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sysfs := fstest.MapFS{}
+	for _, port := range []struct{ device, state, phys string }{
+		{"mlx5_0", "4: ACTIVE", "5: LinkUp"},
+		{"rdma0", "1: DOWN", "2: Polling"},
+	} {
+		sysfs[port.device+"/ports/1/link_layer"] = &fstest.MapFile{Data: []byte("InfiniBand")}
+		sysfs[port.device+"/ports/1/state"] = &fstest.MapFile{Data: []byte(port.state)}
+		sysfs[port.device+"/ports/1/phys_state"] = &fstest.MapFile{Data: []byte(port.phys)}
+		sysfs[port.device+"/ports/1/rate"] = &fstest.MapFile{Data: []byte("400 Gb/sec (4X NDR)")}
+	}
+	// One ib_port_state result per port; return them all.
+	portStates := func(measurements []health.Measurement) []health.CheckVerdict {
+		t.Helper()
+		verdict, err := cat.EvaluateAllWithOptions(catalog.EvaluationOptions{}, measurements...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []health.CheckVerdict
+		for _, c := range verdict.CheckResults {
+			if c.CheckID == "ib_port_state" {
+				out = append(out, c)
+			}
+		}
+		return out
+	}
+
+	stock := collectInfiniBandPorts(t, runnable, sysfs)
+	if len(stock) != 2 {
+		t.Fatalf("stock CLI built %d measurements, want both devices: %v", len(stock), stock)
+	}
+	var renamedDown bool
+	for _, v := range portStates(stock) {
+		renamedDown = renamedDown || (v.Severity == health.Critical && slices.Equal(v.AffectedEntities, []string{"rdma0/1"}))
+	}
+	if !renamedDown {
+		t.Fatalf("stock CLI: want ib_port_state CRITICAL naming rdma0/1: %+v", portStates(stock))
+	}
+
+	filtered := collectInfiniBandPorts(t, runnable, sysfs, WithCollectDefaults())
+	if len(filtered) != 1 {
+		t.Fatalf("collect default built %d measurements, want only mlx5_0: %v", len(filtered), filtered)
+	}
+	for _, v := range portStates(filtered) {
+		if v.Severity != health.Pass {
+			t.Fatalf("collect default: ib_port_state = %v, want PASS with the renamed device unseen", v.Severity)
+		}
+	}
+}
+
+// WithCollectDefaults is a no-op source option that makes a test opt out of
+// the stock CLI's WithAllDevices and use collect's mlx-only default.
+func WithCollectDefaults() ibsource.Option { return func(*ibsource.Source) {} }
 
 // unreadableFS stands in for a sysfs class the process may not list.
 type unreadableFS struct{}
