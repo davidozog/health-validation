@@ -45,14 +45,6 @@ func TestInfiniBandAdapterGroupsByPort(t *testing.T) {
 	}
 }
 
-// No InfiniBand devices is absence, not a fault: nothing is emitted, so the
-// port checks are skipped rather than failed.
-func TestInfiniBandAdapterEmptyIsNeutral(t *testing.T) {
-	if got := InfiniBand().Build(nil); len(got) != 0 {
-		t.Fatalf("empty domain emitted %v, want nothing", got)
-	}
-}
-
 // A failure listing a device's ports names the device and fails every port
 // signal; a per-signal failure fails only that signal.
 func TestInfiniBandAdapterAttributesFailures(t *testing.T) {
@@ -89,15 +81,18 @@ func TestInfiniBandAdapterAttributesFailures(t *testing.T) {
 	}
 }
 
-// A whole-source failure, and Errored, both yield one unidentified
-// measurement with every signal failed, so no check passes on missing data.
+// A whole-source failure, no observations at all, and Errored each yield one
+// unidentified measurement with every signal failed, so no check passes on
+// missing data. Zero ports is not evidence of a host without InfiniBand: a
+// missing driver or the device-name filter produces the same emptiness.
 func TestInfiniBandAdapterSourceFailure(t *testing.T) {
 	o := portObservation(ibsignals.StateName, "", 0, nil)
 	o.Target = nil
 	o.Outcome = &observation.Observation_CollectionError{CollectionError: &observation.CollectionError{Category: observation.CollectionErrorCategoryUnavailable}}
 	for name, got := range map[string][]health.Measurement{
-		"source failure": InfiniBand().Build([]*observation.Observation{o}),
-		"errored":        InfiniBand().Errored(errors.New("timeout")),
+		"source failure":  InfiniBand().Build([]*observation.Observation{o}),
+		"no observations": InfiniBand().Build(nil),
+		"errored":         InfiniBand().Errored(errors.New("timeout")),
 	} {
 		if len(got) != 1 {
 			t.Fatalf("%s: got %d measurements, want one: %v", name, len(got), got)

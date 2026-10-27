@@ -8,6 +8,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -120,19 +123,7 @@ func TestBuiltinCollectInfiniBandPortVerdicts(t *testing.T) {
 		sysfs[port.device+"/ports/1/phys_state"] = &fstest.MapFile{Data: []byte(port.phys)}
 		sysfs[port.device+"/ports/1/rate"] = &fstest.MapFile{Data: []byte(port.rate)}
 	}
-	source := ibsensor.New(ibsource.New(sysfs), ibsensor.WithLinkLayers("InfiniBand", "Ethernet"))
-	sensors, err := New().collectSensors(time.Second, []collect.Sensor{source}, []CollectAdapter{collectadapters.InfiniBand()}, requiredFor(runnable))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var measurements []health.Measurement
-	for _, sensor := range sensors {
-		m, measureErr := sensor.Measure(context.Background())
-		if measureErr != nil {
-			t.Fatal(measureErr)
-		}
-		measurements = append(measurements, m...)
-	}
+	measurements := collectInfiniBandPorts(t, runnable, sysfs)
 	if len(measurements) != 3 {
 		t.Fatalf("got %d measurements, want one per port: %v", len(measurements), measurements)
 	}
@@ -150,6 +141,86 @@ func TestBuiltinCollectInfiniBandPortVerdicts(t *testing.T) {
 		t.Fatalf("want ib_port_state CRITICAL naming mlx5_2/1: %+v", verdict.CheckResults)
 	}
 }
+
+// collectInfiniBandPorts runs the stock InfiniBand wiring over fsys as
+// /sys/class/infiniband and returns the port measurements it builds.
+func collectInfiniBandPorts(t *testing.T, runnable []*health.CheckDefinition, fsys fs.FS) []health.Measurement {
+	t.Helper()
+	source := ibsensor.New(ibsource.New(fsys), ibsensor.WithLinkLayers("InfiniBand", "Ethernet"))
+	sensors, err := New().collectSensors(time.Second, []collect.Sensor{source}, []CollectAdapter{collectadapters.InfiniBand()}, requiredFor(runnable))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var measurements []health.Measurement
+	for _, sensor := range sensors {
+		m, measureErr := sensor.Measure(context.Background())
+		if measureErr != nil {
+			t.Fatal(measureErr)
+		}
+		measurements = append(measurements, m...)
+	}
+	return measurements
+}
+
+// Finding no ports is a collection failure, not a healthy host without
+// InfiniBand: a missing class, an empty one, one whose every device the
+// mlx name filter drops, and one that cannot be read all look alike from
+// sysfs, and a missing driver produces the first. Each fails the port
+// check without naming a port rather than letting the run report PASS.
+func TestBuiltinCollectInfiniBandAbsenceFails(t *testing.T) {
+	cat, _, err := buildCatalog(nil, nil, "GB200", health.OperatorInfra)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runnable, err := cat.RunnableChecks(catalog.EvaluationOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	renamed := fstest.MapFS{
+		"rdma0/ports/1/link_layer": &fstest.MapFile{Data: []byte("InfiniBand")},
+		"rdma0/ports/1/state":      &fstest.MapFile{Data: []byte("1: DOWN")},
+		"rdma0/ports/1/phys_state": &fstest.MapFile{Data: []byte("2: Polling")},
+		"rdma0/ports/1/rate":       &fstest.MapFile{Data: []byte("400 Gb/sec (4X NDR)")},
+	}
+	for name, fsys := range map[string]fs.FS{
+		"missing class":    os.DirFS(filepath.Join(t.TempDir(), "infiniband")),
+		"no devices":       fstest.MapFS{},
+		"only renamed":     renamed,
+		"unreadable class": unreadableFS{},
+	} {
+		t.Run(name, func(t *testing.T) {
+			measurements := collectInfiniBandPorts(t, runnable, fsys)
+			if len(measurements) != 1 {
+				t.Fatalf("got %d measurements, want one collection failure: %v", len(measurements), measurements)
+			}
+			port, ok := measurements[0].(infiniband.PortMeasurement)
+			if !ok || port.EntityID() != "" || len(port.Errors()) == 0 {
+				t.Fatalf("measurement = %+v (errors %v), want an unidentified failed port", measurements[0], measurements[0].Errors())
+			}
+			verdict, err := cat.EvaluateAllWithOptions(catalog.EvaluationOptions{}, measurements...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var state *health.CheckVerdict
+			for i := range verdict.CheckResults {
+				if verdict.CheckResults[i].CheckID == "ib_port_state" {
+					state = &verdict.CheckResults[i]
+				}
+			}
+			if state == nil || state.Skipped || state.Severity != health.Critical {
+				t.Fatalf("ib_port_state = %+v, want evaluated CRITICAL", state)
+			}
+			if len(state.AffectedEntities) != 0 {
+				t.Errorf("AffectedEntities = %v, want none: no port was identified", state.AffectedEntities)
+			}
+		})
+	}
+}
+
+// unreadableFS stands in for a sysfs class the process may not list.
+type unreadableFS struct{}
+
+func (unreadableFS) Open(string) (fs.File, error) { return nil, fs.ErrPermission }
 
 func TestCollectSkipsUnselectedBridgeSources(t *testing.T) {
 	source := &collectAppSensor{}

@@ -93,8 +93,9 @@ docker run --rm \
 The wrapper includes the complete mount set for journal-backed checks;
 `gpu_xid_*` and `rdma_linkflap_fatal` need a systemd journal on the host.
 `ib_port_state` reads `/sys/class/infiniband`, which the container sees
-through the host's sysfs without extra mounts; a host with no InfiniBand
-devices skips it rather than failing.
+through the host's sysfs without extra mounts. Finding no ports there is a
+collection failure, not a skip, so a deployment without InfiniBand lists the
+check in `disabled_checks`.
 
 ### Static binary (bare metal, Slurm)
 
