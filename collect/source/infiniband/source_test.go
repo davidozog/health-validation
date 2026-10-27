@@ -57,7 +57,7 @@ func TestRead(t *testing.T) {
 	require.Equal(t, "N/A (no PMA)", readings[4].NoValue.GetDetail())
 	require.Equal(t, observation.CollectionErrorCategoryParseError, readings[5].Failure.GetCategory())
 	require.Equal(t, observation.CollectionErrorCategoryUnavailable, readings[6].Failure.GetCategory())
-	s = New(files, "mlx5_1")
+	s = New(files, WithExcludedDevices("mlx5_1"))
 	readings, err = s.Read(context.Background(), collect.Signals{ibsignals.State})
 	require.NoError(t, err)
 	require.Len(t, readings, 1)
@@ -122,6 +122,27 @@ func TestMissingClassIsAFailure(t *testing.T) {
 	readings, err := s.Read(context.Background(), collect.Signals{ibsignals.State, ibsignals.FirmwareVersion})
 	require.ErrorIs(t, err, fs.ErrNotExist)
 	require.Empty(t, readings)
+}
+
+// The mlx name filter matches GPUd, so a renamed device is skipped unless
+// the consumer asks for every device.
+func TestWithAllDevicesAdmitsRenamedDevices(t *testing.T) {
+	files := fstest.MapFS{
+		"mlx5_0/ports/1/link_layer": {Data: []byte("InfiniBand")},
+		"mlx5_0/ports/1/state":      {Data: []byte("4: ACTIVE\n")},
+		"rdma0/ports/1/link_layer":  {Data: []byte("InfiniBand")},
+		"rdma0/ports/1/state":       {Data: []byte("1: DOWN\n")},
+	}
+	readings, err := New(files).Read(context.Background(), collect.Signals{ibsignals.State})
+	require.NoError(t, err)
+	require.Len(t, readings, 1)
+	require.Equal(t, "mlx5_0", readings[0].Target.GetInfiniBandPort().GetDevice().GetName())
+
+	readings, err = New(files, WithAllDevices()).Read(context.Background(), collect.Signals{ibsignals.State})
+	require.NoError(t, err)
+	require.Len(t, readings, 2)
+	require.Equal(t, "rdma0", readings[1].Target.GetInfiniBandPort().GetDevice().GetName())
+	require.Equal(t, int64(1), readings[1].Value.GetIntValue())
 }
 
 func TestDeviceInventoryWithoutPorts(t *testing.T) {

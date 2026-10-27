@@ -19,6 +19,7 @@ go_library(
         "//collect/observation",
         "//collect/sensors/cpu",
         "//collect/sensors/infiniband",
+        "//collect/source/infiniband",
         "//toolkit",
         "//toolkit/internal/collectadapters",
         "//toolkit/internal/collectbridge",

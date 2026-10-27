@@ -16,6 +16,7 @@ import (
 	"github.com/dsx-ai-factory/health-validation/collect/observation"
 	cpusensor "github.com/dsx-ai-factory/health-validation/collect/sensors/cpu"
 	ibsensor "github.com/dsx-ai-factory/health-validation/collect/sensors/infiniband"
+	ibsource "github.com/dsx-ai-factory/health-validation/collect/source/infiniband"
 	"github.com/dsx-ai-factory/health-validation/toolkit"
 	"github.com/dsx-ai-factory/health-validation/toolkit/internal/collectadapters"
 	"github.com/dsx-ai-factory/health-validation/toolkit/internal/collectbridge"
@@ -104,10 +105,12 @@ func (a *App) builtinCollect() ([]collect.Sensor, []CollectAdapter) {
 		sources = append(sources, cpusensor.New(nil))
 		adapters = append(adapters, collectadapters.CPU())
 	}
-	// Port state is checked on RoCE ports too, so the stock CLI
-	// widens the sensor's InfiniBand-only default. Signal narrowing keeps
-	// sysfs untouched unless an InfiniBand port check will run.
-	sources = append(sources, ibsensor.New(nil, ibsensor.WithLinkLayers("InfiniBand", "Ethernet")))
+	// Port state is checked on RoCE ports and on renamed devices too, so
+	// the stock CLI widens collect's GPUd-parity defaults (InfiniBand-only,
+	// mlx*-named): a DOWN port on rdma0 must not hide behind a healthy
+	// mlx5_0. Signal narrowing keeps sysfs untouched unless an InfiniBand
+	// port check will run.
+	sources = append(sources, ibsensor.New(ibsource.New(nil, ibsource.WithAllDevices()), ibsensor.WithLinkLayers("InfiniBand", "Ethernet")))
 	adapters = append(adapters, collectadapters.InfiniBand())
 	return sources, adapters
 }

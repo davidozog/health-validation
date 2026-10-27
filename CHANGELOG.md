@@ -14,9 +14,15 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   uncabled RoCE ports scope the check to InfiniBand.
 - The stock CLI feeds that check from the `collect/sensors/infiniband` sysfs
   sensor through the collect bridge, requesting port signals only when a port
-  check will run.
+  check will run. It reads every device under `/sys/class/infiniband`
+  (`collect/source/infiniband.WithAllDevices`), so a DOWN port on a renamed
+  device such as `rdma0` is reported rather than hidden behind a healthy
+  `mlx5_0`. Finding no ports at all is a collection failure, not a skip.
 - `collect/sensors/infiniband.New` takes options; `WithLinkLayers` admits
   non-InfiniBand (RoCE) ports. The default stays InfiniBand-only.
+- `collect/source/infiniband.New` takes options: `WithExcludedDevices`
+  replaces the variadic exclusion list, and `WithAllDevices` admits devices
+  not named `mlx*`. The default stays mlx-only, matching GPUd.
 
 ### Changed
 
