@@ -23,8 +23,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `ib_port_state`, an InfiniBand port check evaluating the new
   `infiniband.PortMeasurement` (one per sysfs port, RoCE included): every port
   must be ACTIVE with its physical link up. Verdicts name the port (`mlx5_0/1`)
-  in `affected_components[].entities`. `checked_link_layers` lets a fleet with
-  uncabled RoCE ports scope the check to InfiniBand.
+  in `affected_components[].entities`. `excluded_link_layers` (empty by
+  default) lets a fleet with uncabled RoCE ports leave Ethernet out; an
+  exclusion list means a misspelled entry checks more ports, never fewer.
 - The stock CLI feeds that check from the `collect/sensors/infiniband` sysfs
   sensor through the collect bridge, requesting port signals only when a port
   check will run. It reads every device under `/sys/class/infiniband`
