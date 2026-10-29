@@ -124,25 +124,58 @@ func TestMissingClassIsAFailure(t *testing.T) {
 	require.Empty(t, readings)
 }
 
-// The mlx name filter matches GPUd, so a renamed device is skipped unless
-// the consumer asks for every device.
-func TestWithAllDevicesAdmitsRenamedDevices(t *testing.T) {
+// The mlx name filter matches GPUd, so a renamed NVIDIA HCA is skipped
+// unless the consumer selects by PCI vendor, which also leaves out other
+// vendors' devices and software RDMA devices that have no PCI function.
+func TestWithVendorsSelectsByPCIVendor(t *testing.T) {
 	files := fstest.MapFS{
-		"mlx5_0/ports/1/link_layer": {Data: []byte("InfiniBand")},
-		"mlx5_0/ports/1/state":      {Data: []byte("4: ACTIVE\n")},
-		"rdma0/ports/1/link_layer":  {Data: []byte("InfiniBand")},
-		"rdma0/ports/1/state":       {Data: []byte("1: DOWN\n")},
+		"mlx5_0/device/vendor":        {Data: []byte("0x15b3\n")},
+		"mlx5_0/ports/1/link_layer":   {Data: []byte("InfiniBand")},
+		"mlx5_0/ports/1/state":        {Data: []byte("4: ACTIVE\n")},
+		"rdma0/device/vendor":         {Data: []byte("0x15B3\n")},
+		"rdma0/ports/1/link_layer":    {Data: []byte("InfiniBand")},
+		"rdma0/ports/1/state":         {Data: []byte("1: DOWN\n")},
+		"bnxt_re0/device/vendor":      {Data: []byte("0x14e4\n")},
+		"bnxt_re0/ports/1/link_layer": {Data: []byte("Ethernet")},
+		"bnxt_re0/ports/1/state":      {Data: []byte("1: DOWN\n")},
+		"rxe0/ports/1/link_layer":     {Data: []byte("Ethernet")},
+		"rxe0/ports/1/state":          {Data: []byte("1: DOWN\n")},
+		"opaque0/device/vendor":       {Data: []byte("0x14e4\n")},
+		"opaque0/ports/1/link_layer":  {Data: []byte("InfiniBand")},
+		"opaque0/ports/1/state":       {Data: []byte("1: DOWN\n")},
 	}
+	devices := func(readings []Reading) []string {
+		var out []string
+		for _, r := range readings {
+			out = append(out, r.Target.GetInfiniBandPort().GetDevice().GetName())
+		}
+		return out
+	}
+
 	readings, err := New(files).Read(context.Background(), collect.Signals{ibsignals.State})
 	require.NoError(t, err)
-	require.Len(t, readings, 1)
-	require.Equal(t, "mlx5_0", readings[0].Target.GetInfiniBandPort().GetDevice().GetName())
+	require.Equal(t, []string{"mlx5_0"}, devices(readings))
 
-	readings, err = New(files, WithAllDevices()).Read(context.Background(), collect.Signals{ibsignals.State})
+	// opaque0's vendor file exists but cannot be read: identity unknown, so it is read.
+	denied := deniedFS{FS: files, name: "opaque0/device/vendor"}
+	readings, err = New(denied, WithVendors(VendorNVIDIA)).Read(context.Background(), collect.Signals{ibsignals.State})
 	require.NoError(t, err)
-	require.Len(t, readings, 2)
-	require.Equal(t, "rdma0", readings[1].Target.GetInfiniBandPort().GetDevice().GetName())
-	require.Equal(t, int64(1), readings[1].Value.GetIntValue())
+	require.Equal(t, []string{"mlx5_0", "opaque0", "rdma0"}, devices(readings))
+	require.Equal(t, int64(1), readings[2].Value.GetIntValue())
+}
+
+// deniedFS refuses to open one path, as sysfs does for a file the process
+// may not read.
+type deniedFS struct {
+	fs.FS
+	name string
+}
+
+func (f deniedFS) Open(name string) (fs.File, error) {
+	if name == f.name {
+		return nil, fs.ErrPermission
+	}
+	return f.FS.Open(name)
 }
 
 func TestDeviceInventoryWithoutPorts(t *testing.T) {

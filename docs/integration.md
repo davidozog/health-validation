@@ -95,8 +95,9 @@ Xid read runs `journalctl --output=json --output-fields=MESSAGE`, which needs
 systemd 236 or later; without a readable kernel journal for the current boot,
 `gpu_xid_*` returns collection-failure verdicts.
 `ib_port_state` reads `/sys/class/infiniband`, which the container sees
-through the host's sysfs without extra mounts, and examines every device
-there, not only `mlx*`-named ones. Finding no ports is a collection failure,
+through the host's sysfs without extra mounts, and examines every NVIDIA HCA
+there (PCI vendor `0x15b3`), not only `mlx*`-named ones; other vendors' and
+software RDMA devices are not checked. Finding no ports is a collection failure,
 not a skip, so a deployment without InfiniBand lists the check in
 `disabled_checks`.
 

@@ -26,6 +26,9 @@ import (
 const (
 	Name        = "infiniband.sysfs"
 	DefaultRoot = "/sys/class/infiniband"
+	// VendorNVIDIA is the PCI vendor ID of ConnectX and BlueField HCAs, as
+	// sysfs spells it; NVIDIA networking silicon kept Mellanox's ID.
+	VendorNVIDIA = "0x15b3"
 )
 
 var ErrInUse = errors.New("InfiniBand read already in progress")
@@ -36,8 +39,9 @@ type Source struct {
 	files      fs.FS
 	excluded   map[string]bool
 	restricted map[string]error
-	mu         sync.Mutex
-	allDevices bool
+	// vendors selects devices by PCI vendor ID instead of by name when set.
+	vendors map[string]bool
+	mu      sync.Mutex
 }
 
 // Option configures a Source.
@@ -52,10 +56,19 @@ func WithExcludedDevices(names ...string) Option {
 	}
 }
 
-// WithAllDevices reads every device under the class. The default reads only
-// devices named mlx*, as GPUd does, which misses an NVIDIA RDMA device the
-// host has renamed (for example rdma0).
-func WithAllDevices() Option { return func(s *Source) { s.allDevices = true } }
+// WithVendors selects devices by the PCI vendor ID in <device>/device/vendor
+// (for example [VendorNVIDIA]) instead of by name. The default reads only
+// devices named mlx*, as GPUd does, which misses an NVIDIA HCA the host has
+// renamed (rdma0); a name filter wide enough to catch that also admits other
+// vendors' and software RDMA devices, which have no PCI function.
+func WithVendors(ids ...string) Option {
+	return func(s *Source) {
+		s.vendors = make(map[string]bool, len(ids))
+		for _, id := range ids {
+			s.vendors[strings.ToLower(id)] = true
+		}
+	}
+}
 
 // New uses /sys/class/infiniband when files is nil. An fs.FS permits fixture
 // testing and alternate host mounts without changing process-global paths.
@@ -122,7 +135,7 @@ func (s *Source) Read(ctx context.Context, selected collect.Signals) ([]Reading,
 	var readings []Reading
 	cache := make(map[string]fileResult)
 	for _, device := range devices {
-		if s.excluded[device.Name()] || (!s.allDevices && !strings.HasPrefix(device.Name(), "mlx")) {
+		if s.excluded[device.Name()] || !s.selects(device.Name()) {
 			continue
 		}
 		target := observation.InfiniBandDeviceTarget(device.Name())
@@ -188,6 +201,21 @@ func (s *Source) Read(ctx context.Context, selected collect.Signals) ([]Reading,
 		}
 	}
 	return readings, nil
+}
+
+// selects applies the configured device filter. Without a vendor file the
+// device is not a PCI function (a software RDMA device) and is skipped; a
+// vendor file that exists but cannot be read leaves the identity unknown,
+// and the device is read rather than silently dropped.
+func (s *Source) selects(device string) bool {
+	if s.vendors == nil {
+		return strings.HasPrefix(device, "mlx")
+	}
+	raw, err := fs.ReadFile(s.files, path.Join(device, "device", "vendor"))
+	if err != nil {
+		return !errors.Is(err, fs.ErrNotExist)
+	}
+	return s.vendors[strings.ToLower(strings.TrimSpace(string(raw)))]
 }
 
 // counterErrors checks selected counters against directory entries before reading.

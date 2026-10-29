@@ -29,15 +29,18 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   It runs on GB200, GB300, and B200, like `rdma_linkflap_fatal`.
 - The stock CLI feeds that check from the `collect/sensors/infiniband` sysfs
   sensor through the collect bridge, requesting port signals only when a port
-  check will run. It reads every device under `/sys/class/infiniband`
-  (`collect/source/infiniband.WithAllDevices`), so a DOWN port on a renamed
-  device such as `rdma0` is reported rather than hidden behind a healthy
-  `mlx5_0`. Finding no ports at all is a collection failure, not a skip.
+  check will run. It selects devices under `/sys/class/infiniband` by PCI
+  vendor (`collect/source/infiniband.WithVendors(VendorNVIDIA)`), so a DOWN
+  port on a renamed NVIDIA HCA such as `rdma0` is reported rather than hidden
+  behind a healthy `mlx5_0`, while other vendors' and software RDMA devices
+  are not checked. Finding no ports at all is a collection failure, not a
+  skip.
 - `collect/sensors/infiniband.New` takes options; `WithLinkLayers` admits
   non-InfiniBand (RoCE) ports. The default stays InfiniBand-only.
 - `collect/source/infiniband.New` takes options: `WithExcludedDevices`
-  replaces the variadic exclusion list, and `WithAllDevices` admits devices
-  not named `mlx*`. The default stays mlx-only, matching GPUd.
+  replaces the variadic exclusion list, and `WithVendors` selects devices by
+  the PCI vendor ID in `<device>/device/vendor` (`VendorNVIDIA` is `0x15b3`)
+  instead of by name. The default stays mlx-only, matching GPUd.
 
 ### Changed
 

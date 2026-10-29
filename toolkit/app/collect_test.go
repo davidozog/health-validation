@@ -135,6 +135,7 @@ func TestBuiltinCollectInfiniBandPortVerdicts(t *testing.T) {
 		{"mlx5_1", "InfiniBand", "4: ACTIVE", "5: LinkUp", "400 Gb/sec (4X NDR)"},
 		{"mlx5_2", "InfiniBand", "1: DOWN", "2: Polling", "10 Gb/sec (4X SDR)"},
 	} {
+		sysfs[port.device+"/device/vendor"] = &fstest.MapFile{Data: []byte(ibsource.VendorNVIDIA)}
 		sysfs[port.device+"/ports/1/link_layer"] = &fstest.MapFile{Data: []byte(port.layer)}
 		sysfs[port.device+"/ports/1/state"] = &fstest.MapFile{Data: []byte(port.state)}
 		sysfs[port.device+"/ports/1/phys_state"] = &fstest.MapFile{Data: []byte(port.phys)}
@@ -166,7 +167,7 @@ func TestBuiltinCollectInfiniBandPortVerdicts(t *testing.T) {
 func collectInfiniBandPorts(t *testing.T, runnable []*health.CheckDefinition, fsys fs.FS, sourceOpts ...ibsource.Option) []health.Measurement {
 	t.Helper()
 	if sourceOpts == nil {
-		sourceOpts = []ibsource.Option{ibsource.WithAllDevices()}
+		sourceOpts = []ibsource.Option{ibsource.WithVendors(ibsource.VendorNVIDIA)}
 	}
 	source := ibsensor.New(ibsource.New(fsys, sourceOpts...), ibsensor.WithLinkLayers("InfiniBand", "Ethernet"))
 	sensors, err := New().collectSensors(time.Second, []collect.Sensor{source}, []CollectAdapter{collectadapters.InfiniBand()}, requiredFor(runnable))
@@ -185,10 +186,11 @@ func collectInfiniBandPorts(t *testing.T, runnable []*health.CheckDefinition, fs
 }
 
 // Finding no ports is a collection failure, not a healthy host without
-// InfiniBand: a missing class, an empty one, one whose every device
-// collect's mlx name filter drops, and one that cannot be read all look
-// alike from sysfs, and a missing driver produces the first. Each fails the
-// port check without naming a port rather than letting the run report PASS.
+// InfiniBand: a missing class, an empty one, one whose every device the
+// device filter drops (collect's mlx name filter, or the stock CLI's NVIDIA
+// vendor filter), and one that cannot be read all look alike from sysfs, and
+// a missing driver produces the first. Each fails the port check without
+// naming a port rather than letting the run report PASS.
 func TestBuiltinCollectInfiniBandAbsenceFails(t *testing.T) {
 	cat, _, err := buildCatalog(nil, nil, "GB200", health.OperatorInfra)
 	if err != nil {
@@ -199,10 +201,18 @@ func TestBuiltinCollectInfiniBandAbsenceFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	renamed := fstest.MapFS{
+		"rdma0/device/vendor":      &fstest.MapFile{Data: []byte(ibsource.VendorNVIDIA)},
 		"rdma0/ports/1/link_layer": &fstest.MapFile{Data: []byte("InfiniBand")},
 		"rdma0/ports/1/state":      &fstest.MapFile{Data: []byte("1: DOWN")},
 		"rdma0/ports/1/phys_state": &fstest.MapFile{Data: []byte("2: Polling")},
 		"rdma0/ports/1/rate":       &fstest.MapFile{Data: []byte("400 Gb/sec (4X NDR)")},
+	}
+	otherVendor := fstest.MapFS{
+		"bnxt_re0/device/vendor":      &fstest.MapFile{Data: []byte("0x14e4")},
+		"bnxt_re0/ports/1/link_layer": &fstest.MapFile{Data: []byte("Ethernet")},
+		"bnxt_re0/ports/1/state":      &fstest.MapFile{Data: []byte("1: DOWN")},
+		"bnxt_re0/ports/1/phys_state": &fstest.MapFile{Data: []byte("2: Polling")},
+		"bnxt_re0/ports/1/rate":       &fstest.MapFile{Data: []byte("100 Gb/sec (4X EDR)")},
 	}
 	for name, tc := range map[string]struct {
 		fsys fs.FS
@@ -211,6 +221,7 @@ func TestBuiltinCollectInfiniBandAbsenceFails(t *testing.T) {
 		"missing class":          {fsys: os.DirFS(filepath.Join(t.TempDir(), "infiniband"))},
 		"no devices":             {fsys: fstest.MapFS{}},
 		"only renamed, filtered": {fsys: renamed, opts: []ibsource.Option{WithCollectDefaults()}},
+		"only another vendor":    {fsys: otherVendor},
 		"unreadable class":       {fsys: unreadableFS{}},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -242,10 +253,12 @@ func TestBuiltinCollectInfiniBandAbsenceFails(t *testing.T) {
 	}
 }
 
-// A DOWN port on a renamed device must not hide behind a healthy mlx5_0:
-// the stock CLI reads every device, so the check fails and names rdma0/1.
-// Collect's GPUd-parity default drops the renamed device and the same host
-// passes, which is why the CLI does not use it.
+// A DOWN port on a renamed NVIDIA HCA must not hide behind a healthy mlx5_0:
+// the stock CLI selects devices by PCI vendor, so the check fails and names
+// rdma0/1, while a DOWN port on another vendor's device or a software RDMA
+// device is not this check's to report. Collect's GPUd-parity name filter
+// drops the renamed device and the same host passes, which is why the CLI
+// does not use it.
 func TestBuiltinCollectInfiniBandRenamedDevice(t *testing.T) {
 	cat, _, err := buildCatalog(nil, nil, "GB200", health.OperatorInfra)
 	if err != nil {
@@ -256,10 +269,15 @@ func TestBuiltinCollectInfiniBandRenamedDevice(t *testing.T) {
 		t.Fatal(err)
 	}
 	sysfs := fstest.MapFS{}
-	for _, port := range []struct{ device, state, phys string }{
-		{"mlx5_0", "4: ACTIVE", "5: LinkUp"},
-		{"rdma0", "1: DOWN", "2: Polling"},
+	for _, port := range []struct{ device, vendor, state, phys string }{
+		{"mlx5_0", ibsource.VendorNVIDIA, "4: ACTIVE", "5: LinkUp"},
+		{"rdma0", ibsource.VendorNVIDIA, "1: DOWN", "2: Polling"},
+		{"bnxt_re0", "0x14e4", "1: DOWN", "2: Polling"},
+		{"rxe0", "", "1: DOWN", "2: Polling"},
 	} {
+		if port.vendor != "" {
+			sysfs[port.device+"/device/vendor"] = &fstest.MapFile{Data: []byte(port.vendor)}
+		}
 		sysfs[port.device+"/ports/1/link_layer"] = &fstest.MapFile{Data: []byte("InfiniBand")}
 		sysfs[port.device+"/ports/1/state"] = &fstest.MapFile{Data: []byte(port.state)}
 		sysfs[port.device+"/ports/1/phys_state"] = &fstest.MapFile{Data: []byte(port.phys)}
@@ -283,11 +301,14 @@ func TestBuiltinCollectInfiniBandRenamedDevice(t *testing.T) {
 
 	stock := collectInfiniBandPorts(t, runnable, sysfs)
 	if len(stock) != 2 {
-		t.Fatalf("stock CLI built %d measurements, want both devices: %v", len(stock), stock)
+		t.Fatalf("stock CLI built %d measurements, want both NVIDIA devices: %v", len(stock), stock)
 	}
 	var renamedDown bool
 	for _, v := range portStates(stock) {
-		renamedDown = renamedDown || (v.Severity == health.Critical && slices.Equal(v.AffectedEntities, []string{"rdma0/1"}))
+		if v.Severity == health.Critical && !slices.Equal(v.AffectedEntities, []string{"rdma0/1"}) {
+			t.Fatalf("stock CLI: ib_port_state CRITICAL for %v, want only the NVIDIA device rdma0/1", v.AffectedEntities)
+		}
+		renamedDown = renamedDown || v.Severity == health.Critical
 	}
 	if !renamedDown {
 		t.Fatalf("stock CLI: want ib_port_state CRITICAL naming rdma0/1: %+v", portStates(stock))
@@ -305,7 +326,7 @@ func TestBuiltinCollectInfiniBandRenamedDevice(t *testing.T) {
 }
 
 // WithCollectDefaults is a no-op source option that makes a test opt out of
-// the stock CLI's WithAllDevices and use collect's mlx-only default.
+// the stock CLI's vendor selection and use collect's mlx-only default.
 func WithCollectDefaults() ibsource.Option { return func(*ibsource.Source) {} }
 
 // unreadableFS stands in for a sysfs class the process may not list.

@@ -121,9 +121,10 @@ func (a *App) builtinCollect() ([]collect.Sensor, []CollectAdapter) {
 	// Port state is checked on RoCE ports and on renamed devices too, so
 	// the stock CLI widens collect's GPUd-parity defaults (InfiniBand-only,
 	// mlx*-named): a DOWN port on rdma0 must not hide behind a healthy
-	// mlx5_0. Signal narrowing keeps sysfs untouched unless an InfiniBand
-	// port check will run.
-	sources = append(sources, ibsensor.New(ibsource.New(nil, ibsource.WithAllDevices()), ibsensor.WithLinkLayers("InfiniBand", "Ethernet")))
+	// mlx5_0. Devices are selected by PCI vendor rather than name so other
+	// vendors' and software RDMA devices do not fail the check. Signal
+	// narrowing keeps sysfs untouched unless an InfiniBand port check will run.
+	sources = append(sources, ibsensor.New(ibsource.New(nil, ibsource.WithVendors(ibsource.VendorNVIDIA)), ibsensor.WithLinkLayers("InfiniBand", "Ethernet")))
 	adapters = append(adapters, collectadapters.InfiniBand())
 	return sources, adapters
 }
