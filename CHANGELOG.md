@@ -44,6 +44,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `toolkit/observations` converts several measurement types per category when
   their signals are disjoint, and carries InfiniBand port and device targets
   in both directions. The collect bridge validates those targets.
+- `infiniband.PortMeasurement` implements `health.EntityKeyed`: a named port
+  is verified under `<device>/<port>`, and a failure before any port was
+  enumerated is keyed by its source (`collect.infiniband` for the bridge
+  adapter) via `SetEntityKey`.
 
 ## [catalog/v0.3.0] and [toolkit/v0.3.0] - 2026-10-05
 

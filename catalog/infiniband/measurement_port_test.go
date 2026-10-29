@@ -30,6 +30,32 @@ func TestPortMeasurementEntityID(t *testing.T) {
 	}
 }
 
+// A named port or device is verified under its EntityID; an unnamed failure
+// is unidentified until its producer keys it by source, and that key wins.
+func TestPortMeasurementEntityKey(t *testing.T) {
+	var _ health.EntityKeyed = infiniband.PortMeasurement{}
+	sysfsDown := infiniband.ErroredPort("", 0, errors.New("sysfs unreadable"), infiniband.PortMeasurementSignals...)
+	sourced := sysfsDown
+	sourced.SetEntityKey(health.SourceEntity("collect.infiniband"))
+	for _, tc := range []struct {
+		name string
+		want health.EntityKey
+		m    infiniband.PortMeasurement
+	}{
+		{name: "port", m: port("ACTIVE", "LinkUp"), want: health.VerifiedEntity("mlx5_0/1")},
+		{name: "device only", m: infiniband.ErroredPort("mlx5_2", 0, errors.New("ports unreadable")), want: health.VerifiedEntity("mlx5_2")},
+		{name: "unnamed", m: sysfsDown},
+		{name: "keyed by source", m: sourced, want: health.SourceEntity("collect.infiniband")},
+	} {
+		if got := health.KeyOf(tc.m); got != tc.want {
+			t.Errorf("%s: KeyOf = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	if sourced.EntityID() != "" {
+		t.Errorf("EntityID = %q, want empty: a source-level failure names no port", sourced.EntityID())
+	}
+}
+
 // A down port's verdict carries the port in AffectedEntities, which is what
 // feeds affected_components[].entities and the affected-entities metric.
 func TestPortStateVerdictNamesThePort(t *testing.T) {

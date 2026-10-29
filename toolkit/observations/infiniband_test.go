@@ -4,8 +4,10 @@
 package observations
 
 import (
+	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/dsx-ai-factory/health-validation/catalog/health"
 	"github.com/dsx-ai-factory/health-validation/catalog/infiniband"
@@ -81,8 +83,8 @@ func TestToMeasurementsInfiniBandDeviceFailure(t *testing.T) {
 	}
 }
 
-// A whole-source failure carries no target and yields one unidentified
-// measurement, which EntityID omits, with every signal failed.
+// A whole-source failure carries no target and yields one measurement that
+// names no port, keyed by the source that failed, with every signal failed.
 func TestToMeasurementsInfiniBandSourceFailure(t *testing.T) {
 	o := ibObservation(ibsignals.StateName, nil)
 	o.Target = nil
@@ -90,6 +92,9 @@ func TestToMeasurementsInfiniBandSourceFailure(t *testing.T) {
 	port := only[infiniband.PortMeasurement](t, ToMeasurements([]*observation.Observation{o}))
 	if port.EntityID() != "" {
 		t.Fatalf("EntityID = %q, want empty for an unidentified port", port.EntityID())
+	}
+	if key := health.KeyOf(port); key != health.SourceEntity("infiniband.sysfs") {
+		t.Errorf("key = %v, want the failed source", key)
 	}
 	if failed := failedSignals(port); !slices.Equal(failed, []string{infiniband.SignalIBState}) {
 		t.Errorf("failed = %v, want the observed signal", failed)
@@ -133,6 +138,7 @@ func TestFromMeasurementsTargetsInfiniBandPorts(t *testing.T) {
 		{name: "device", m: infiniband.PortMeasurement{Device: "mlx5_0"}, want: observation.InfiniBandDeviceTarget("mlx5_0")},
 		{name: "unidentified", m: infiniband.PortMeasurement{}},
 		{name: "invalid port", m: infiniband.PortMeasurement{Device: "mlx5_0", Port: -1}},
+		{name: "source-level", m: sourceFailedPort()},
 	} {
 		for id, o := range exportBySignal(t, tc.m) {
 			if got := o.GetTarget().String(); got != tc.want.String() {
@@ -140,6 +146,34 @@ func TestFromMeasurementsTargetsInfiniBandPorts(t *testing.T) {
 			}
 		}
 	}
+}
+
+// A failure keyed by its source exports under that source and restores with
+// the same key, so a serialized batch evaluates as the live run did.
+func TestInfiniBandSourceFailureRoundTripsItsKey(t *testing.T) {
+	exported, err := FromMeasurements("infiniband", testNode, time.Unix(1, 0), sourceFailedPort())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range exported {
+		if o.GetSource() != "collect.infiniband" || o.GetTarget() != nil {
+			t.Errorf("%s: source %q target %v, want the key's source and no target", o.GetSignalId(), o.GetSource(), o.GetTarget())
+		}
+	}
+	restored := only[infiniband.PortMeasurement](t, ToMeasurements(exported))
+	if key := health.KeyOf(restored); key != health.SourceEntity("collect.infiniband") {
+		t.Errorf("restored key = %v, want the exported source", key)
+	}
+	if got, want := slices.Sorted(slices.Values(failedSignals(restored))), slices.Sorted(slices.Values(infiniband.PortMeasurementSignals)); !slices.Equal(got, want) {
+		t.Errorf("restored failed = %v, want every signal", got)
+	}
+}
+
+// sourceFailedPort is the adapter's whole-domain failure, keyed by its source.
+func sourceFailedPort() infiniband.PortMeasurement {
+	m := infiniband.ErroredPort("", 0, errors.New("sysfs unreadable"), infiniband.PortMeasurementSignals...)
+	m.SetEntityKey(health.SourceEntity("collect.infiniband"))
+	return m
 }
 
 func portSignals() []collect.Signal {

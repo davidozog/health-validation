@@ -10,6 +10,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/dsx-ai-factory/health-validation/catalog"
 	"github.com/dsx-ai-factory/health-validation/catalog/health"
 	"github.com/dsx-ai-factory/health-validation/catalog/infiniband"
 	"github.com/dsx-ai-factory/health-validation/collect"
@@ -39,6 +40,8 @@ func TestInfiniBandAdapterGroupsByPort(t *testing.T) {
 		{Device: "mlx5_0", Port: 1, State: "ACTIVE", PhysicalState: "LinkUp", RateGbps: 400, LinkLayer: "InfiniBand"},
 		{Device: "mlx5_1", Port: 1, State: "ACTIVE", PhysicalState: "LinkUp", RateGbps: 100, LinkLayer: "Ethernet"},
 	} {
+		// The converter records the key it grouped by, the port's verified ID.
+		want.SetEntityKey(health.VerifiedEntity(want.EntityID()))
 		if !reflect.DeepEqual(got[i], want) {
 			t.Errorf("measurement %d = %+v (errors %v), want %+v", i, got[i], got[i].Errors(), want)
 		}
@@ -82,29 +85,80 @@ func TestInfiniBandAdapterAttributesFailures(t *testing.T) {
 }
 
 // A whole-source failure, no observations at all, and Errored each yield one
-// unidentified measurement with every signal failed, so no check passes on
+// source-keyed measurement with every signal failed, so no check passes on
 // missing data. Zero ports is not evidence of a host without InfiniBand: a
 // missing driver or the device-name filter produces the same emptiness.
 func TestInfiniBandAdapterSourceFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		got  []health.Measurement
+		want health.EntityKey
+	}{
+		{name: "source failure", got: InfiniBand().Build([]*observation.Observation{sourceFailure()}), want: health.SourceEntity("infiniband.sysfs")},
+		{name: "no observations", got: InfiniBand().Build(nil), want: health.SourceEntity("collect.infiniband")},
+		{name: "errored", got: InfiniBand().Errored(errors.New("timeout")), want: health.SourceEntity("collect.infiniband")},
+	} {
+		if len(tc.got) != 1 {
+			t.Fatalf("%s: got %d measurements, want one: %v", tc.name, len(tc.got), tc.got)
+		}
+		port := tc.got[0].(infiniband.PortMeasurement)
+		if port.EntityID() != "" {
+			t.Errorf("%s: EntityID = %q, want empty", tc.name, port.EntityID())
+		}
+		if key := health.KeyOf(port); key != tc.want {
+			t.Errorf("%s: key = %v, want %v", tc.name, key, tc.want)
+		}
+		if got, want := slices.Sorted(slices.Values(failed(port))), slices.Sorted(slices.Values(infiniband.PortMeasurementSignals)); !slices.Equal(got, want) {
+			t.Errorf("%s: failed = %v, want every signal %v", tc.name, got, want)
+		}
+	}
+}
+
+// Two healthy ports beside a failure to enumerate ports are three entities:
+// each port passes under its own name and the failure fails without naming one.
+func TestInfiniBandAdapterDistinguishesPortsFromEnumerationFailure(t *testing.T) {
+	obs := slices.Concat(portObservations("mlx5_0", 1, "InfiniBand", 400), portObservations("mlx5_1", 1, "InfiniBand", 400))
+	obs = append(obs, sourceFailure())
+	ms := InfiniBand().Build(obs)
+	var keys []health.EntityKey
+	for _, m := range ms {
+		keys = append(keys, health.KeyOf(m))
+	}
+	want := []health.EntityKey{health.VerifiedEntity("mlx5_0/1"), health.VerifiedEntity("mlx5_1/1"), health.SourceEntity("infiniband.sysfs")}
+	if !slices.Equal(keys, want) {
+		t.Fatalf("keys = %v, want %v", keys, want)
+	}
+
+	cat := catalog.New(catalog.WithArchitecture("GB200"), catalog.WithExecutionContext(health.OperatorInfra))
+	verdict, err := cat.EvaluateAll(ms...)
+	if err != nil {
+		t.Fatalf("EvaluateAll: %v, want the three entities told apart", err)
+	}
+	var passed, critical []string
+	for _, v := range verdict.CheckResults {
+		if v.CheckID != "ib_port_state" || v.Skipped {
+			continue
+		}
+		switch v.Severity {
+		case health.Pass:
+			passed = append(passed, v.AffectedEntities...)
+			passed = append(passed, "pass")
+		case health.Critical:
+			critical = append(critical, v.AffectedEntities...)
+			critical = append(critical, "critical")
+		}
+	}
+	if len(passed) != 2 || len(critical) != 1 {
+		t.Fatalf("ib_port_state results: passed %v, critical %v; want two passes and one unnamed failure: %+v", passed, critical, verdict.CheckResults)
+	}
+}
+
+// sourceFailure is a target-less collection failure: no port was enumerated.
+func sourceFailure() *observation.Observation {
 	o := portObservation(ibsignals.StateName, "", 0, nil)
 	o.Target = nil
 	o.Outcome = &observation.Observation_CollectionError{CollectionError: &observation.CollectionError{Category: observation.CollectionErrorCategoryUnavailable}}
-	for name, got := range map[string][]health.Measurement{
-		"source failure":  InfiniBand().Build([]*observation.Observation{o}),
-		"no observations": InfiniBand().Build(nil),
-		"errored":         InfiniBand().Errored(errors.New("timeout")),
-	} {
-		if len(got) != 1 {
-			t.Fatalf("%s: got %d measurements, want one: %v", name, len(got), got)
-		}
-		port := got[0].(infiniband.PortMeasurement)
-		if port.EntityID() != "" {
-			t.Errorf("%s: EntityID = %q, want empty", name, port.EntityID())
-		}
-		if got, want := slices.Sorted(slices.Values(failed(port))), slices.Sorted(slices.Values(infiniband.PortMeasurementSignals)); !slices.Equal(got, want) {
-			t.Errorf("%s: failed = %v, want every signal %v", name, got, want)
-		}
-	}
+	return o
 }
 
 func failed(m health.Measurement) []string {

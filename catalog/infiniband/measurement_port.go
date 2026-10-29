@@ -52,6 +52,7 @@ type PortMeasurement struct {
 	State         string `json:"ib_state"`
 	PhysicalState string `json:"ib_physical_state"`
 	LinkLayer     string `json:"ib_link_layer"`
+	entity        health.EntityKey
 	errors        []health.ErroredMeasurement
 	Port          int64   `json:"ib_port"`
 	RateGbps      float64 `json:"ib_rate_gbps"`
@@ -92,6 +93,25 @@ func (m PortMeasurement) EntityID() string {
 	}
 	return fmt.Sprintf("%s/%d", m.Device, m.Port)
 }
+
+// EntityKey implements [health.EntityKeyed]. Without a key from
+// [PortMeasurement.SetEntityKey], a named port or device is verified under
+// its EntityID and an unnamed one is unidentified.
+func (m PortMeasurement) EntityKey() health.EntityKey {
+	switch id := m.EntityID(); {
+	case m.entity != health.EntityKey{}:
+		return m.entity
+	case id == "":
+		return health.EntityKey{}
+	default:
+		return health.VerifiedEntity(id)
+	}
+}
+
+// SetEntityKey records the identity evaluation keys this measurement by. Set
+// it on a failure before any port was enumerated, which names no device: a
+// [health.SourceEntity] of the producer, rather than an unidentified port.
+func (m *PortMeasurement) SetEntityKey(k health.EntityKey) { m.entity = k }
 
 // Errors implements [health.Measurement].
 func (m PortMeasurement) Errors() []health.ErroredMeasurement { return m.errors }

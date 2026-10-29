@@ -124,7 +124,9 @@ func erroredNVLink(err error) []health.Measurement {
 }
 
 func erroredInfiniBand(err error) []health.Measurement {
-	return []health.Measurement{infiniband.ErroredPort("", 0, err, infiniband.PortMeasurementSignals...)}
+	m := infiniband.ErroredPort("", 0, err, infiniband.PortMeasurementSignals...)
+	m.SetEntityKey(health.SourceEntity(adapterSource(health.InfiniBand)))
+	return []health.Measurement{m}
 }
 
 // adaptCategory groups observations per entity (GPU or InfiniBand port), or

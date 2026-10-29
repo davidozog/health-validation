@@ -137,7 +137,7 @@ func export(source, nodeID string, at *timestamppb.Timestamp, m health.Measureme
 // measurementTarget returns the GPU or InfiniBand port a measurement
 // describes, or the node for a host-wide measurement. A provisional key
 // targets its source-local slot, not gpu_id, which is only a label. A
-// source-level failure names no GPU, any other failed GPU identity lookup
+// source-level failure names no entity, any other failed GPU identity lookup
 // leaves gpu_id as a placeholder, and an unidentified port leaves ib_device
 // empty or its port number invalid, so those carry no target.
 func measurementTarget(m health.Measurement, v reflect.Value, nodeID string, failures map[string][]error) *observation.ObservationTarget {
@@ -152,9 +152,9 @@ func measurementTarget(m health.Measurement, v reflect.Value, nodeID string, fai
 			port = v.Field(i)
 		}
 	}
+	key := health.KeyOf(m)
 	if gpuID.IsValid() && gpuID.Kind() == reflect.String {
-		id, key := gpuID.String(), health.KeyOf(m)
-		switch {
+		switch id := gpuID.String(); {
 		case id == "" || key.SourceLevel():
 			return nil
 		case key.Provisional():
@@ -167,7 +167,7 @@ func measurementTarget(m health.Measurement, v reflect.Value, nodeID string, fai
 	if device.IsValid() && port.IsValid() && device.Kind() == reflect.String && port.CanInt() {
 		name := device.String()
 		switch n := port.Int(); {
-		case name == "", n < 0, n > math.MaxUint32:
+		case name == "", key.SourceLevel(), n < 0, n > math.MaxUint32:
 			return nil
 		case n > 0:
 			return observation.InfiniBandPortTarget(name, uint32(n))
