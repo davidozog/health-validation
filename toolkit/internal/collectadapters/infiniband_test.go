@@ -6,7 +6,6 @@ package collectadapters
 import (
 	"errors"
 	"maps"
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -191,10 +190,17 @@ func TestInfiniBandAdapterGroupsByPort(t *testing.T) {
 		{Device: "mlx5_0", Port: 1, State: "ACTIVE", PhysicalState: "LinkUp", RateGbps: 400, LinkLayer: "InfiniBand"},
 		{Device: "mlx5_1", Port: 1, State: "ACTIVE", PhysicalState: "LinkUp", RateGbps: 100, LinkLayer: "Ethernet"},
 	} {
+		port := got[i]
+		if port.Device != want.Device || port.Port != want.Port || port.State != want.State ||
+			port.PhysicalState != want.PhysicalState || port.RateGbps != want.RateGbps || port.LinkLayer != want.LinkLayer {
+			t.Errorf("measurement %d = %+v, want %+v", i, port, want)
+		}
+		if len(port.Errors()) != 0 {
+			t.Errorf("measurement %d errors = %v, want none", i, port.Errors())
+		}
 		// The converter records the key it grouped by, the port's verified ID.
-		want.SetEntityKey(health.VerifiedEntity(want.EntityID()))
-		if !reflect.DeepEqual(got[i], want) {
-			t.Errorf("measurement %d = %+v (errors %v), want %+v", i, got[i], got[i].Errors(), want)
+		if key := health.KeyOf(port); key != health.VerifiedEntity(want.EntityID()) {
+			t.Errorf("measurement %d keyed %v, want %v", i, key, health.VerifiedEntity(want.EntityID()))
 		}
 	}
 }
