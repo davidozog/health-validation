@@ -229,6 +229,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   exclusion list means a misspelled entry checks more ports, never fewer.
   It runs on GB200 and GB300; B200 waits on the architecture validation
   process being settled in #255.
+- `ib_port_state` takes `excluded_ports`, a list of ports it does not assess,
+  each as `<device>/<port>` (`mlx5_5/1`, the form the verdict's
+  `affected_components[].entities` uses) or a bare device name for every port
+  on it. For a port that is deliberately down on every node, such as an unused
+  second port on a north-south NIC, where excluding its whole link layer would
+  also drop the live ports beside it. Like `excluded_link_layers`, a
+  misspelled entry excludes nothing.
 - The stock CLI feeds that check from the `collect/sensors/infiniband` sysfs
   sensor through the collect bridge, requesting port signals only when a port
   check will run. It selects devices under `/sys/class/infiniband` by PCI

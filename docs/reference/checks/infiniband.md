@@ -8,7 +8,7 @@ InfiniBand covers InfiniBand network health: port state, error rates, and link i
 
 `ib_port_state`
 
-Verifies every port (InfiniBand and RoCE alike, unless its link layer is excluded) is in the expected logical state (ACTIVE) and physical link state (LinkUp). Fails CRITICAL per port that is not. Assumes the run sees the node's RDMA devices under /sys/class/infiniband; a guest with no RDMA device assigned sees none and reports UNKNOWN, so such deployments list the check in disabled_checks.
+Verifies every port (InfiniBand and RoCE alike, unless its link layer or the port itself is excluded) is in the expected logical state (ACTIVE) and physical link state (LinkUp). Fails CRITICAL per port that is not. Assumes the run sees the node's RDMA devices under /sys/class/infiniband; a guest with no RDMA device assigned sees none and reports UNKNOWN, so such deployments list the check in disabled_checks.
 
 | Property | Value |
 |---|---|
@@ -26,14 +26,15 @@ Verifies every port (InfiniBand and RoCE alike, unless its link layer is exclude
 | Name | Value | Unit | Category | Description |
 |---|---|---|---|---|
 | <nobr>`excluded_link_layers`</nobr> | [] |  | <nobr>`DEFAULT`</nobr> | Link layers, as sysfs names them ("InfiniBand", "Ethernet"), whose ports this check does not assess. Empty by default, so every port is checked. Add "Ethernet" for a fleet whose RoCE ports are uncabled, rather than disabling the check. A misspelled entry excludes nothing. |
+| <nobr>`excluded_ports`</nobr> | [] |  | <nobr>`DEFAULT`</nobr> | Ports this check does not assess, each as "&lt;device>/&lt;port>" ("mlx5_5/1", the form affected_components[].entities uses) or a bare device name ("mlx5_5") for every port on that device. Empty by default. For a port that is deliberately down on every node, such as an unused second port on a north-south NIC. The exclusion reaches every node that reads the config, so a port that is down on only some nodes needs a config those nodes alone read. A misspelled entry excludes nothing. |
 | <nobr>`expected_ib_physical_state`</nobr> | LinkUp | state | <nobr>`DEFAULT`</nobr> | Physical link state every port must report, as sysfs names it in phys_state: Sleep, Polling, Disabled, PortConfigurationTraining, LinkUp, LinkErrorRecovery, or Phy Test. Case-sensitive; a misspelling fails every port rather than passing one. Override per fleet. |
 | <nobr>`expected_ib_state`</nobr> | ACTIVE | state | <nobr>`DEFAULT`</nobr> | Logical port state every port must report, as sysfs names it (the text after the colon in /sys/class/infiniband/&lt;dev>/ports/&lt;n>/state): DOWN, INIT, ARMED, ACTIVE, or ACTIVE_DEFER. Case-sensitive; a misspelling fails every port rather than passing one. Override per fleet. |
 
 **Rules**
 
-- **CRITICAL** when `!(ib_link_layer in excluded_link_layers) && ib_state != expected_ib_state`
+- **CRITICAL** when `!(ib_link_layer in excluded_link_layers) && !(ib_device in excluded_ports) && !(ib_device + "/" + string(ib_port) in excluded_ports) && ib_state != expected_ib_state`
   - Message: Port $\{ib_device\}:$\{ib_port\} ($\{ib_link_layer\}): state $\{ib_state\}, expected $\{expected_ib_state\}.
-- **CRITICAL** when `!(ib_link_layer in excluded_link_layers) && ib_physical_state != expected_ib_physical_state`
+- **CRITICAL** when `!(ib_link_layer in excluded_link_layers) && !(ib_device in excluded_ports) && !(ib_device + "/" + string(ib_port) in excluded_ports) && ib_physical_state != expected_ib_physical_state`
   - Message: Port $\{ib_device\}:$\{ib_port\} ($\{ib_link_layer\}): physical state $\{ib_physical_state\}, expected $\{expected_ib_physical_state\}.
 
 **Recommended action:** operational state `drain`, then `restart_os` → `service_required`

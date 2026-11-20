@@ -74,7 +74,7 @@ This file provides guidance to AI coding agents when working with code in this r
 | `nvlink_capabilities` | nvlink | A required NVLink capability (P2P, sysmem access/atomics, SLI, link) is unsupported | None |
 | `nvlink_p2p` | nvlink | Unhealthy P2P peer count exceeds `max_unhealthy_p2p_peers` | None |
 | `rdma_linkflap_fatal` | infiniband | Count of mlx5 RDMA link outages (down→up ≥ `min_outage_seconds`) reaches `fatal_flap_threshold` | None |
-| `ib_port_state` | infiniband | A port whose link layer is not in `excluded_link_layers` (empty by default, so InfiniBand and Ethernet alike) has logical state ≠ `expected_ib_state` (ACTIVE) or physical state ≠ `expected_ib_physical_state` (LinkUp) | None |
+| `ib_port_state` | infiniband | A port whose link layer is not in `excluded_link_layers` (empty by default, so InfiniBand and Ethernet alike) and that is not named in `excluded_ports` (`mlx5_5/1` or `mlx5_5`, empty by default) has logical state ≠ `expected_ib_state` (ACTIVE) or physical state ≠ `expected_ib_physical_state` (LinkUp) | None |
 | `gpu_xid_<code>` | xid | A critical-class Xid code is seen on a GPU in the system journal within the collection window | A warning-class Xid code is seen on a GPU in the system journal within the collection window |
 | `gpu_xid_149_<hex>` | xid | An Xid 149 NETIR_LINK_EVT/NETIR_LINK_DOWN subtype on a GPU whose decode-table resolution is a GPU reset | The same, for a subtype the table resolves to IGNORE |
 | `gpu_xid_154` | xid | The driver requested a GPU reset or reboot for a GPU | The driver requested a P2P drain or an action the catalog does not map, or an Xid 154's transition could not be read |

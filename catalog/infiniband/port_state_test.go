@@ -178,6 +178,55 @@ func TestPortState_ExcludedLinkLayers(t *testing.T) {
 	}
 }
 
+// A port that is deliberately down on every node is named in excluded_ports
+// rather than silencing its whole link layer or the check. Entries take the
+// verdict's own "<device>/<port>" form, or a bare device name for every port
+// on it. The list excludes rather than includes, so "mlx5_5:1" or a wrong
+// device excludes nothing and the down port still fails.
+func TestPortState_ExcludedPorts(t *testing.T) {
+	down := port("DOWN", "Disabled")
+	down.Device, down.Port = "mlx5_5", 1
+	secondPort := down
+	secondPort.Port = 2
+	other := port("DOWN", "Polling")
+
+	for _, tc := range []struct {
+		name     string
+		excluded []string
+		excused  []infiniband.PortMeasurement
+		checked  []infiniband.PortMeasurement
+	}{
+		{name: "device and port", excluded: []string{"mlx5_5/1"}, excused: []infiniband.PortMeasurement{down}, checked: []infiniband.PortMeasurement{secondPort, other}},
+		{name: "whole device", excluded: []string{"mlx5_5"}, excused: []infiniband.PortMeasurement{down, secondPort}, checked: []infiniband.PortMeasurement{other}},
+		{name: "wrong separator", excluded: []string{"mlx5_5:1"}, checked: []infiniband.PortMeasurement{down, other}},
+		{name: "other device", excluded: []string{"mlx5_4/1", "mlx5_4"}, checked: []infiniband.PortMeasurement{down, other}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cat := ibCatalog(catalog.WithOverrides(catalog.NewOverrideSet(
+				catalog.Override{CheckID: "ib_port_state", ThresholdName: "excluded_ports", Value: tc.excluded},
+			)))
+			for _, m := range tc.excused {
+				v, err := cat.Evaluate("ib_port_state", m)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if v.Skipped || v.Severity != health.Pass {
+					t.Errorf("%s excluded by %v: skipped=%v severity=%v, want PASS", m.EntityID(), tc.excluded, v.Skipped, v.Severity)
+				}
+			}
+			for _, m := range tc.checked {
+				v, err := cat.Evaluate("ib_port_state", m)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if v.Severity != health.Critical {
+					t.Errorf("%s not excluded by %v: severity = %v, want CRITICAL", m.EntityID(), tc.excluded, v.Severity)
+				}
+			}
+		})
+	}
+}
+
 // A port that is both down and untrained trips both rules, so an operator
 // sees the whole picture rather than one symptom.
 func TestPortState_BothRulesMatch(t *testing.T) {

@@ -17,8 +17,12 @@ import "github.com/dsx-ai-factory/health-validation/catalog/health"
 // It applies to every port the sensor reports, whatever its link layer: a
 // port that is down is down whether it runs InfiniBand or RoCE. A fleet with
 // uncabled RoCE ports lists Ethernet in excluded_link_layers rather than
-// disabling the check. An exclusion list fails safe: a misspelled entry
-// checks more ports than intended instead of letting a down port pass.
+// disabling the check, and a fleet with one port deliberately down on every
+// node (an unused second port on a north-south NIC, say) names it in
+// excluded_ports, as "<device>/<port>" or a bare device name, which is the
+// same form the verdict uses in affected_components[].entities. Both
+// exclusion lists fail safe: a misspelled entry checks more ports than
+// intended instead of letting a down port pass.
 //
 // It assumes the run sees the node's RDMA devices under /sys/class/infiniband:
 // a bare-metal host, a container or Kubernetes worker on host sysfs, or a VM
@@ -33,7 +37,7 @@ func PortState() health.CheckDefinition {
 	return health.CheckDefinition{
 		ID:          "ib_port_state",
 		Name:        "InfiniBand Port State",
-		Description: "Verifies every port (InfiniBand and RoCE alike, unless its link layer is excluded) is in the expected logical state (ACTIVE) and physical link state (LinkUp). Fails CRITICAL per port that is not. Assumes the run sees the node's RDMA devices under /sys/class/infiniband; a guest with no RDMA device assigned sees none and reports UNKNOWN, so such deployments list the check in disabled_checks.",
+		Description: "Verifies every port (InfiniBand and RoCE alike, unless its link layer or the port itself is excluded) is in the expected logical state (ACTIVE) and physical link state (LinkUp). Fails CRITICAL per port that is not. Assumes the run sees the node's RDMA devices under /sys/class/infiniband; a guest with no RDMA device assigned sees none and reports UNKNOWN, so such deployments list the check in disabled_checks.",
 		Category:    health.InfiniBand,
 
 		RequiredSignals: []string{
@@ -63,6 +67,12 @@ func PortState() health.CheckDefinition {
 				Category:    health.DefaultThreshold,
 				Description: "Link layers, as sysfs names them (\"InfiniBand\", \"Ethernet\"), whose ports this check does not assess. Empty by default, so every port is checked. Add \"Ethernet\" for a fleet whose RoCE ports are uncabled, rather than disabling the check. A misspelled entry excludes nothing.",
 			},
+			"excluded_ports": {
+				Value:       []string{},
+				ValueType:   health.ThresholdStringList,
+				Category:    health.DefaultThreshold,
+				Description: "Ports this check does not assess, each as \"<device>/<port>\" (\"mlx5_5/1\", the form affected_components[].entities uses) or a bare device name (\"mlx5_5\") for every port on that device. Empty by default. For a port that is deliberately down on every node, such as an unused second port on a north-south NIC. The exclusion reaches every node that reads the config, so a port that is down on only some nodes needs a config those nodes alone read. A misspelled entry excludes nothing.",
+			},
 			"expected_ib_state": {
 				Value:       "ACTIVE",
 				ValueType:   health.ThresholdString,
@@ -81,12 +91,12 @@ func PortState() health.CheckDefinition {
 
 		Rules: []health.Rule{
 			{
-				Expression: "!(ib_link_layer in excluded_link_layers) && ib_state != expected_ib_state",
+				Expression: "!(ib_link_layer in excluded_link_layers) && !(ib_device in excluded_ports) && !(ib_device + \"/\" + string(ib_port) in excluded_ports) && ib_state != expected_ib_state",
 				Severity:   health.Critical,
 				Message:    "Port ${ib_device}:${ib_port} (${ib_link_layer}): state ${ib_state}, expected ${expected_ib_state}.",
 			},
 			{
-				Expression: "!(ib_link_layer in excluded_link_layers) && ib_physical_state != expected_ib_physical_state",
+				Expression: "!(ib_link_layer in excluded_link_layers) && !(ib_device in excluded_ports) && !(ib_device + \"/\" + string(ib_port) in excluded_ports) && ib_physical_state != expected_ib_physical_state",
 				Severity:   health.Critical,
 				Message:    "Port ${ib_device}:${ib_port} (${ib_link_layer}): physical state ${ib_physical_state}, expected ${expected_ib_physical_state}.",
 			},
